@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { CpuState, GUIDE_STEPS, LESSONS, createCpuState, formatBits, formatHex, parseByte, restoreSnapshot, stepCpu, updateProgram } from "@/lib/cpu";
 
 type DetailKey = "PC" | "IR" | "Registers" | "ALU" | "Decoder" | "Memory" | "Clock" | "RealCPU" | "HALT";
+const SMOOTH_STEP_DURATION_MS = 1800;
 
 const DETAILS: Record<DetailKey, { title: string; lead: string; body: string }> = {
   PC: { title: "PC（Program Counter）", lead: "いま、どの命令を実行するかを管理します。", body: "このアプリでは、分かりやすく「実行する命令の場所」として表示しています。実際のCPUでは命令取得の仕組みやPCの更新タイミングが異なる場合があります。" },
@@ -130,7 +131,7 @@ export default function Home() {
     if (!smoothRunning || cpu.status !== "ready") return;
     let frame = 0;
     let startedAt: number | null = null;
-    const duration = 1000 / speed;
+    const duration = SMOOTH_STEP_DURATION_MS / speed;
     const tick = (now: number) => {
       if (startedAt === null) startedAt = now;
       const progress = Math.min((now - startedAt) / duration, 1);
@@ -235,7 +236,7 @@ export default function Home() {
                 <button type="button" onClick={() => setDetail("ALU")} className={`alu-card ${componentActive(cpu, "ALU") ? "is-active" : ""}`}><span>ALU</span><strong>{cpu.ir?.op === "ADD" ? "+" : cpu.ir?.op === "SUB" ? "−" : cpu.ir?.op === "CMP" ? "?=" : "·"}</strong><small>計算・比較</small></button>
               </div>
               {cpu.transfer && <div key={cpu.cycle} className={`transfer-readout kind-${cpu.transfer.kind}`} aria-live="polite"><span>{cpu.transfer.from}</span><i>→</i><strong>{cpu.transfer.value}</strong><i>→</i><span>{cpu.transfer.to}</span></div>}
-              {smoothRunning && <div className="smooth-flow-status" role="status"><Waves aria-hidden="true" /><span>HALTまで自動再生中</span><span ref={smoothTrackRef} className="smooth-flow-track" aria-hidden="true"><i /></span></div>}
+              {smoothRunning && <div className="smooth-flow-status" role="status"><Waves aria-hidden="true" /><span>ゆっくり自動再生中</span><span ref={smoothTrackRef} className="smooth-flow-track" aria-hidden="true"><i /></span></div>}
             </div>
           </section>
 
