@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Binary, BookOpen, ChevronLeft, ChevronRight, CircleHelp, Cpu, Gauge, Pause, Play, RotateCcw, SkipForward, Undo2, X, Zap } from "lucide-react";
+import { Binary, BookOpen, ChevronLeft, ChevronRight, CircleHelp, Cpu, Gauge, Pause, Play, RotateCcw, SkipForward, Undo2, Waves, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -74,17 +74,24 @@ export default function Home() {
   const [cpu, setCpu] = useState(() => createCpuState(LESSONS[0]));
   const cpuRef = useRef(cpu);
   const [running, setRunning] = useState(false);
+  const [smoothRunning, setSmoothRunning] = useState(false);
+  const smoothTrackRef = useRef<HTMLSpanElement>(null);
   const [speed, setSpeed] = useState(1);
   const [binaryMode, setBinaryMode] = useState(false);
   const [guideIndex, setGuideIndex] = useState(0);
   const [detail, setDetail] = useState<DetailKey | null>(null);
 
+  const stopPlayback = useCallback(() => {
+    setRunning(false);
+    setSmoothRunning(false);
+  }, []);
+
   const commitState = useCallback((next: CpuState) => {
     cpuRef.current = next;
     setCpu(next);
-    if (next.status !== "ready") setRunning(false);
+    if (next.status !== "ready") stopPlayback();
     return next;
-  }, []);
+  }, [stopPlayback]);
 
   const performSteps = useCallback((count = 1) => {
     let next = cpuRef.current;
@@ -95,9 +102,22 @@ export default function Home() {
   const loadLesson = useCallback((id: typeof LESSONS[number]["id"]) => {
     const nextLesson = LESSONS.find((item) => item.id === id) ?? LESSONS[0];
     setLessonId(nextLesson.id);
-    setRunning(false);
+    stopPlayback();
     commitState(createCpuState(nextLesson));
-  }, [commitState]);
+  }, [commitState, stopPlayback]);
+
+  const toggleSmoothPlayback = useCallback(() => {
+    if (smoothRunning) {
+      setSmoothRunning(false);
+      return;
+    }
+    setRunning(false);
+    if (cpuRef.current.status !== "ready") {
+      const currentLesson = LESSONS.find((item) => item.id === lessonIdRef.current) ?? LESSONS[0];
+      commitState(createCpuState(currentLesson));
+    }
+    setSmoothRunning(true);
+  }, [commitState, smoothRunning]);
 
   useEffect(() => { cpuRef.current = cpu; }, [cpu]);
   useEffect(() => { lessonIdRef.current = lessonId; }, [lessonId]);
@@ -106,6 +126,24 @@ export default function Home() {
     const timer = window.setInterval(() => performSteps(1), 1000 / speed);
     return () => window.clearInterval(timer);
   }, [running, speed, cpu.status, performSteps]);
+  useEffect(() => {
+    if (!smoothRunning || cpu.status !== "ready") return;
+    let frame = 0;
+    let startedAt: number | null = null;
+    const duration = 1000 / speed;
+    const tick = (now: number) => {
+      if (startedAt === null) startedAt = now;
+      const progress = Math.min((now - startedAt) / duration, 1);
+      smoothTrackRef.current?.style.setProperty("--smooth-progress", String(progress));
+      if (progress >= 1) {
+        performSteps(1);
+        startedAt = now;
+      }
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [smoothRunning, speed, cpu.status, performSteps]);
 
   useEffect(() => {
     const context = document.modelContext;
@@ -119,7 +157,7 @@ export default function Home() {
       const id = (input as { lesson?: string })?.lesson;
       const selected = LESSONS.find((item) => item.id === id);
       if (!selected) throw new Error("Unknown lesson.");
-      setLessonId(selected.id); setRunning(false); return compactState(commitState(createCpuState(selected)));
+      setLessonId(selected.id); stopPlayback(); return compactState(commitState(createCpuState(selected)));
     } });
     register({ name: "configure_cpu_state", title: "CPUの値を設定", description: "PC、R0〜R3、表示中のメモリをまとめて設定します。", inputSchema: { type: "object", properties: { pc: { type: "integer", minimum: 0, maximum: 252, multipleOf: 4 }, registers: { type: "array", minItems: 4, maxItems: 4, items: { type: "integer", minimum: 0, maximum: 255 } }, memory: { type: "object", additionalProperties: { type: "integer", minimum: 0, maximum: 255 } } }, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute: (input: unknown) => {
       const values = input as { pc?: number; registers?: number[]; memory?: Record<string, number> };
@@ -129,14 +167,14 @@ export default function Home() {
       const memory = { ...previous.memory };
       for (const [addressText, value] of Object.entries(values.memory ?? {})) { const address = parseByte(addressText); if (address === null || !Number.isInteger(value) || value < 0 || value > 255) throw new Error("Memory addresses and values must be bytes."); memory[address] = value; }
       const next: CpuState = { ...previous, pc: values.pc ?? previous.pc, registers: values.registers ? [...values.registers] : previous.registers, memory, ir: null, phase: "locate", status: "ready", history: [], transfer: null, message: "CPUの値を更新しました。" };
-      setRunning(false); return compactState(commitState(next));
+      stopPlayback(); return compactState(commitState(next));
     } });
-    register({ name: "step_cpu", title: "CPUを進める", description: "CPUを指定した小ステップ数だけ進めます。", inputSchema: { type: "object", properties: { steps: { type: "integer", minimum: 1, maximum: 100 } }, required: ["steps"], additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute: (input: unknown) => { const steps = (input as { steps?: number })?.steps; if (!Number.isInteger(steps) || (steps ?? 0) < 1 || (steps ?? 0) > 100) throw new Error("steps must be an integer from 1 to 100."); setRunning(false); return compactState(performSteps(steps)); } });
-    register({ name: "reset_cpu", title: "CPUをリセット", description: "現在のレッスンを最初からやり直します。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute: () => { const selected = LESSONS.find((item) => item.id === lessonIdRef.current) ?? LESSONS[0]; setRunning(false); return compactState(commitState(createCpuState(selected))); } });
+    register({ name: "step_cpu", title: "CPUを進める", description: "CPUを指定した小ステップ数だけ進めます。", inputSchema: { type: "object", properties: { steps: { type: "integer", minimum: 1, maximum: 100 } }, required: ["steps"], additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute: (input: unknown) => { const steps = (input as { steps?: number })?.steps; if (!Number.isInteger(steps) || (steps ?? 0) < 1 || (steps ?? 0) > 100) throw new Error("steps must be an integer from 1 to 100."); stopPlayback(); return compactState(performSteps(steps)); } });
+    register({ name: "reset_cpu", title: "CPUをリセット", description: "現在のレッスンを最初からやり直します。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute: () => { const selected = LESSONS.find((item) => item.id === lessonIdRef.current) ?? LESSONS[0]; stopPlayback(); return compactState(commitState(createCpuState(selected))); } });
     return () => lifecycle.abort();
-  }, [commitState, performSteps]);
+  }, [commitState, performSteps, stopPlayback]);
 
-  const editState = (patch: Partial<CpuState>, message: string) => { setRunning(false); commitState({ ...cpuRef.current, ...patch, ir: null, phase: "locate", status: "ready", transfer: null, pendingResult: null, pendingTarget: null, branchTaken: false, history: [], message }); };
+  const editState = (patch: Partial<CpuState>, message: string) => { stopPlayback(); commitState({ ...cpuRef.current, ...patch, ir: null, phase: "locate", status: "ready", transfer: null, pendingResult: null, pendingTarget: null, branchTaken: false, history: [], message }); };
   const editNumber = (kind: "pc" | "register" | "memory", index: number, text: string) => {
     const value = parseByte(text); if (value === null || (kind === "pc" && value % 4 !== 0)) return;
     if (kind === "pc") editState({ pc: value }, `PCを${formatHex(value)}へ変更しました。`);
@@ -174,7 +212,7 @@ export default function Home() {
                 const isBinarySource = /^[01\s]+$/.test(source.trim());
                 const display = binaryMode && instruction ? (instruction.bits || source) : !binaryMode && instruction && isBinarySource ? assemblyText(instruction) : source;
                 const error = cpu.program.diagnostics[lineIndex];
-                return <div key={`${lineIndex}-${binaryMode}`} className={`program-row ${currentLine === lineIndex ? "is-current" : ""} ${error ? "is-invalid" : ""}`} role="listitem"><span className="address">{address === null ? "··" : formatHex(address)}</span><span className="pc-arrow" aria-hidden="true">{currentLine === lineIndex ? "▶" : ""}</span><input aria-label={`プログラム ${lineIndex + 1}行目`} aria-invalid={Boolean(error)} className={`instruction-input ${isLabel ? "label-input" : ""}`} value={display} onChange={(event) => { const lines = [...cpu.programLines]; lines[lineIndex] = event.target.value; setRunning(false); commitState(updateProgram(cpuRef.current, lines)); }} />{error && <span className="line-error">{error}</span>}</div>;
+                return <div key={`${lineIndex}-${binaryMode}`} className={`program-row ${currentLine === lineIndex ? "is-current" : ""} ${error ? "is-invalid" : ""}`} role="listitem"><span className="address">{address === null ? "··" : formatHex(address)}</span><span className="pc-arrow" aria-hidden="true">{currentLine === lineIndex ? "▶" : ""}</span><input aria-label={`プログラム ${lineIndex + 1}行目`} aria-invalid={Boolean(error)} className={`instruction-input ${isLabel ? "label-input" : ""}`} value={display} onChange={(event) => { const lines = [...cpu.programLines]; lines[lineIndex] = event.target.value; stopPlayback(); commitState(updateProgram(cpuRef.current, lines)); }} />{error && <span className="line-error">{error}</span>}</div>;
               })}
             </div>
             <p className="tiny-note">命令を書き換えて試せます。アドレスは4ずつ進みます。</p>
@@ -197,6 +235,7 @@ export default function Home() {
                 <button type="button" onClick={() => setDetail("ALU")} className={`alu-card ${componentActive(cpu, "ALU") ? "is-active" : ""}`}><span>ALU</span><strong>{cpu.ir?.op === "ADD" ? "+" : cpu.ir?.op === "SUB" ? "−" : cpu.ir?.op === "CMP" ? "?=" : "·"}</strong><small>計算・比較</small></button>
               </div>
               {cpu.transfer && <div key={cpu.cycle} className={`transfer-readout kind-${cpu.transfer.kind}`} aria-live="polite"><span>{cpu.transfer.from}</span><i>→</i><strong>{cpu.transfer.value}</strong><i>→</i><span>{cpu.transfer.to}</span></div>}
+              {smoothRunning && <div className="smooth-flow-status" role="status"><Waves aria-hidden="true" /><span>HALTまで自動再生中</span><span ref={smoothTrackRef} className="smooth-flow-track" aria-hidden="true"><i /></span></div>}
             </div>
           </section>
 
@@ -210,7 +249,7 @@ export default function Home() {
 
         <section className={`explain-panel ${isFault ? "is-fault" : ""}`} aria-labelledby="explain-title">
           <div className="explain-copy"><div className="explain-icon" aria-hidden="true">{isFault ? "!" : <Zap />}</div><div><p className="overline" id="explain-title">いま何が起きている？ — {phaseLabel[cpu.phase]}</p><p className="main-message">{cpu.message}</p></div></div>
-          <div className="controls"><Button variant="outline" onClick={() => { setRunning(false); commitState(restoreSnapshot(cpuRef.current)); }} disabled={!cpu.history.length} aria-label="1つ前へ戻る"><Undo2 />戻る</Button><Button className="step-button" onClick={() => performSteps(1)} disabled={cpu.status !== "ready"}><SkipForward />Step</Button><Button variant="outline" onClick={() => setRunning((value) => !value)} disabled={cpu.status !== "ready"}>{running ? <Pause /> : <Play />}{running ? "Pause" : "Run"}</Button><Button variant="ghost" size="icon" onClick={() => loadLesson(lessonId)} aria-label="リセット"><RotateCcw /></Button><label className="speed-control"><Gauge aria-hidden="true" /><span className="sr-only">実行速度</span><Slider value={[speed]} onValueChange={(value) => setSpeed(value[0])} min={0.5} max={4} step={0.5} aria-label="実行速度" /><output>{speed}×</output></label>{cpu.status === "halted" && <button type="button" className="halt-help" onClick={() => setDetail("HALT")}>HALTとは？</button>}</div>
+          <div className="controls"><Button variant="outline" onClick={() => { stopPlayback(); commitState(restoreSnapshot(cpuRef.current)); }} disabled={!cpu.history.length} aria-label="1つ前へ戻る"><Undo2 />戻る</Button><Button className="step-button" onClick={() => { stopPlayback(); performSteps(1); }} disabled={cpu.status !== "ready"}><SkipForward />Step</Button><Button className={`smooth-button ${smoothRunning ? "is-active" : ""}`} onClick={toggleSmoothPlayback} aria-pressed={smoothRunning} title="1回押すとHALTまで小さな動きを連続再生します">{smoothRunning ? <Pause /> : <Waves />}{smoothRunning ? "停止" : "なめらか自動"}</Button><Button variant="outline" onClick={() => { setSmoothRunning(false); setRunning((value) => !value); }} disabled={cpu.status !== "ready"}>{running ? <Pause /> : <Play />}{running ? "Pause" : "Run"}</Button><Button variant="ghost" size="icon" onClick={() => loadLesson(lessonId)} aria-label="リセット"><RotateCcw /></Button><label className="speed-control"><Gauge aria-hidden="true" /><span className="sr-only">実行速度</span><Slider value={[speed]} onValueChange={(value) => setSpeed(value[0])} min={0.5} max={4} step={0.5} aria-label="実行速度" /><output>{speed}×</output></label>{cpu.status === "halted" && <button type="button" className="halt-help" onClick={() => setDetail("HALT")}>HALTとは？</button>}</div>
         </section>
 
         <section className="guide-panel" aria-labelledby="guide-title">
