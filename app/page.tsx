@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { CpuState, GUIDE_STEPS, LESSONS, createCpuState, formatBits, formatHex, parseByte, restoreSnapshot, stepCpu, updateProgram } from "@/lib/cpu";
 
 type DetailKey = "PC" | "IR" | "Registers" | "ALU" | "Decoder" | "Memory" | "Clock" | "RealCPU" | "HALT";
-const SMOOTH_STEP_DURATION_MS = 1800;
+const SMOOTH_STEP_DURATION_MS = 3000;
 
 const DETAILS: Record<DetailKey, { title: string; lead: string; body: string }> = {
   PC: { title: "PC（Program Counter）", lead: "いま、どの命令を実行するかを管理します。", body: "このアプリでは、分かりやすく「実行する命令の場所」として表示しています。実際のCPUでは命令取得の仕組みやPCの更新タイミングが異なる場合があります。" },
